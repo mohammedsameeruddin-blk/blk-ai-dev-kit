@@ -1,4 +1,4 @@
-#
+﻿#
 # Blackstraw Enterprise AI Dev Kit — Installer (Windows)
 #
 # 6-step setup: project dir, prerequisites, workspace/profile, MCP server,
@@ -23,7 +23,7 @@
 #   $env:AIDEVKIT_HOME       Install dir (default: ~/.ai-dev-kit)
 #
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 
 # =============================================================================
 # -- ENTERPRISE CONFIGURATION  (edit this section for your organisation) ------
@@ -79,14 +79,14 @@ $ENTERPRISE_SKILLS_REPO = ""
 # Example: "blackstraw-data-architecture-skills"
 $ENTERPRISE_SKILLS_REPO_SUBPATH = ""
 
-# Directory where the skills repo will be cloned locally.
-$ENTERPRISE_SKILLS_REPO_DIR = Join-Path $INSTALL_DIR "${ENTERPRISE_NAME}-skills-repo"
-
 # =============================================================================
 # -- PATHS  (derived - do not edit) -------------------------------------------
 # =============================================================================
 
 $INSTALL_DIR  = if ($env:AIDEVKIT_HOME) { $env:AIDEVKIT_HOME } else { Join-Path $env:USERPROFILE ".ai-dev-kit" }
+
+# Directory where the skills repo will be cloned locally (derived from $INSTALL_DIR above).
+$ENTERPRISE_SKILLS_REPO_DIR = Join-Path $INSTALL_DIR "${ENTERPRISE_NAME}-skills-repo"
 
 $_raw_base    = $ENTERPRISE_KIT_REPO -replace '\.git$', '' -replace 'github\.com', 'raw.githubusercontent.com'
 $_RERUN_CMD   = "`$env:DEVKIT_SKILLS_ONLY='true'; irm ${_raw_base}/${ENTERPRISE_KIT_BRANCH}/enterprise_install.ps1 | iex"
@@ -556,6 +556,9 @@ if (Get-Command databricks -ErrorAction SilentlyContinue) {
         }
         Write-Warn "Not authenticated — opening browser for OAuth login..."
         & databricks auth login --host $script:WORKSPACE_URL --profile $script:PROFILE_
+        $authJson2 = (& databricks current-user me --profile $script:PROFILE_ --output json 2>&1)
+        $authUser2 = Get-DbxUser "$authJson2"
+        if ($authUser2) { Write-Ok "Authenticated as $authUser2" }
     }
 }
 $ErrorActionPreference = $prevEAP

@@ -28,6 +28,9 @@ $script:scoopUpdated = $false
 
 $EnterpriseName    = "Blackstraw"
 $EnterpriseDisplay = "Blackstraw"
+# Default email hint shown when no git/GitHub email is detected.
+# Change this to match your organisation's email domain.
+$EnterpriseDefaultEmail = if ($env:ENTERPRISE_DEFAULT_EMAIL) { $env:ENTERPRISE_DEFAULT_EMAIL } else { "you@blackstraw.ai" }
 
 # =============================================================================
 # -- OUTPUT HELPERS -----------------------------------------------------------
@@ -304,7 +307,7 @@ function Configure-GitIdentity {
     }
 
     $defaultName  = if ($currentName)  { $currentName }  else { "First Last" }
-    $defaultEmail = if ($currentEmail) { $currentEmail } else { "you@blackstraw.ai" }
+    $defaultEmail = if ($currentEmail) { $currentEmail } else { $EnterpriseDefaultEmail }
 
     $name  = prompt_input "Full name for git config" $defaultName
     $email = prompt_input "$EnterpriseDisplay email for git config" $defaultEmail

@@ -46,14 +46,38 @@ ENTERPRISE_KIT_BRANCH="main"
 MIN_AITOOLS_CLI_VERSION="1.0.0"
 
 # MLflow skills fetched from mlflow/skills repo (tagless — main is intentional)
-MLFLOW_SKILLS="agent-evaluation analyze-mlflow-chat-session analyze-mlflow-trace instrumenting-with-mlflow-tracing mlflow-onboarding querying-mlflow-metrics retrieving-mlflow-traces searching-mlflow-docs"
+MLFLOW_SKILLS=(
+    agent-evaluation
+    analyze-mlflow-chat-session
+    analyze-mlflow-trace
+    instrumenting-with-mlflow-tracing
+    mlflow-onboarding
+    querying-mlflow-metrics
+    retrieving-mlflow-traces
+    searching-mlflow-docs
+)
 MLFLOW_BASE_URL="https://raw.githubusercontent.com/mlflow/skills/main"
 
 # Hardcoded fallback for agent skills count (mirrors AGENT_B_STABLE_FALLBACK in
 # the official installer). Used when `databricks aitools list` is unavailable
 # (rate-limited, offline, or CLI too old). Keep in sync with upstream periodically.
-AGENT_B_STABLE_FALLBACK="databricks-agent-bricks databricks-ai-functions databricks-aibi-dashboards databricks-app-design databricks-apps databricks-apps-python databricks-core databricks-dabs databricks-data-discovery databricks-dbsql databricks-docs databricks-execution-compute databricks-iceberg databricks-jobs databricks-lakebase databricks-lakeflow-connect databricks-metric-views databricks-ml-training databricks-mlflow-evaluation databricks-model-serving databricks-pipelines databricks-python-sdk databricks-serverless-migration databricks-spark-structured-streaming databricks-synthetic-data-gen databricks-unity-catalog databricks-unstructured-pdf-generation databricks-vector-search databricks-zerobus-ingest"
-AGENT_B_EXPERIMENTAL_FALLBACK="databricks-ai-runtime databricks-genie spark-python-data-source"
+AGENT_B_STABLE_FALLBACK=(
+    databricks-agent-bricks        databricks-ai-functions        databricks-aibi-dashboards
+    databricks-app-design          databricks-apps                databricks-apps-python
+    databricks-core                databricks-dabs                databricks-data-discovery
+    databricks-dbsql               databricks-docs                databricks-execution-compute
+    databricks-iceberg             databricks-jobs                databricks-lakebase
+    databricks-lakeflow-connect    databricks-metric-views        databricks-ml-training
+    databricks-mlflow-evaluation   databricks-model-serving       databricks-pipelines
+    databricks-python-sdk          databricks-serverless-migration databricks-spark-structured-streaming
+    databricks-synthetic-data-gen  databricks-unity-catalog       databricks-unstructured-pdf-generation
+    databricks-vector-search       databricks-zerobus-ingest
+)
+AGENT_B_EXPERIMENTAL_FALLBACK=(
+    databricks-ai-runtime
+    databricks-genie
+    spark-python-data-source
+)
 _count() { echo $#; }
 
 # Enterprise-specific private skills repo.
@@ -70,14 +94,14 @@ ENTERPRISE_SKILLS_REPO=""
 # Example: "blackstraw-data-architecture-skills"
 ENTERPRISE_SKILLS_REPO_SUBPATH=""
 
-# Directory where the skills repo will be cloned locally.
-ENTERPRISE_SKILLS_REPO_DIR="$INSTALL_DIR/${ENTERPRISE_NAME}-skills-repo"
-
 # =============================================================================
 # ── PATHS  (derived — do not edit) ───────────────────────────────────────────
 # =============================================================================
 
 INSTALL_DIR="${AIDEVKIT_HOME:-$HOME/.ai-dev-kit}"
+
+# Directory where the skills repo will be cloned locally (derived from INSTALL_DIR above).
+ENTERPRISE_SKILLS_REPO_DIR="$INSTALL_DIR/${ENTERPRISE_NAME}-skills-repo"
 
 _raw_base="${ENTERPRISE_KIT_REPO%.git}"
 _raw_base="${_raw_base/github.com/raw.githubusercontent.com}"
@@ -120,8 +144,8 @@ SKILLS_ONLY=false
 SILENT=false
 PROFILE_PROVIDED=false
 
-[ "$FORCE"  = "true" ] || [ "$FORCE"  = "1" ] && FORCE=true  || FORCE=false
-[ "$SILENT" = "true" ] || [ "$SILENT" = "1" ] && SILENT=true || SILENT=false
+if [ "$FORCE"  = "true" ] || [ "$FORCE"  = "1" ]; then FORCE=true;  else FORCE=false;  fi
+if [ "$SILENT" = "true" ] || [ "$SILENT" = "1" ]; then SILENT=true; else SILENT=false; fi
 
 PROJECT_DIR=""
 WORKSPACE_URL=""
@@ -498,6 +522,9 @@ else
             [ -z "$WORKSPACE_URL" ] && WORKSPACE_URL=$(prompt "Workspace URL for profile '$PROFILE'" "https://")
             databricks auth login --host "$WORKSPACE_URL" --profile "$PROFILE" || \
                 warn "Authentication may have failed — re-run: databricks auth login --host $WORKSPACE_URL --profile $PROFILE"
+            _auth_json2="$(databricks current-user me --profile "$PROFILE" --output json 2>/dev/null || true)"
+            _auth_user2="$(_dbx_user "$_auth_json2")"
+            [ -n "$_auth_user2" ] && ok "Authenticated as $_auth_user2"
         fi
     fi
 fi
@@ -593,7 +620,7 @@ if [ "$INSTALL_SKILLS" = true ]; then
     # -- MLflow skills from mlflow/skills repo ---------------------------------
     MLFLOW_COUNT=0
     msg "Fetching MLflow skills..."
-    for _skill in $MLFLOW_SKILLS; do
+    for _skill in "${MLFLOW_SKILLS[@]}"; do
         _dest="$SKILLS_DEST/$_skill"
         mkdir -p "$_dest"
         # --retry 2 handles transient drops; sleep 0.5 between skills avoids burst on slow networks
@@ -650,7 +677,7 @@ if [ "$INSTALL_SKILLS" = true ]; then
         if [ "$_aitools_rc" -eq 0 ]; then
             # Count from the fallback list (mirrors official installer's _count approach).
             # aitools installs the full set; the fallback list is the known stable set.
-            AGENT_COUNT=$(_count $AGENT_B_STABLE_FALLBACK $AGENT_B_EXPERIMENTAL_FALLBACK)
+            AGENT_COUNT=$(_count "${AGENT_B_STABLE_FALLBACK[@]}" "${AGENT_B_EXPERIMENTAL_FALLBACK[@]}")
             ok "Agent skills  ($AGENT_COUNT installed via databricks aitools)"
             # Verify the Claude plugin actually registered
             if command -v claude >/dev/null 2>&1; then

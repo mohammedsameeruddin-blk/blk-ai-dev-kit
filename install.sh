@@ -40,7 +40,7 @@
 #   DEVKIT_FORCE=true DEVKIT_PROFILE=DEFAULT curl -sL https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/main/install.sh | bash
 #
 
-set -e
+set -euo pipefail
 
 # Defaults (can be overridden by environment variables or command-line arguments)
 PROFILE="${DEVKIT_PROFILE:-DEFAULT}"
@@ -67,11 +67,11 @@ MLFLOW_REF="${MLFLOW_REF:-main}"
 INCLUDE_PRERELEASES="${INCLUDE_PRERELEASES:-0}"
 
 # Convert string booleans from env vars to actual booleans
-[ "$FORCE" = "true" ] || [ "$FORCE" = "1" ] && FORCE=true || FORCE=false
-[ "$SILENT" = "true" ] || [ "$SILENT" = "1" ] && SILENT=true || SILENT=false
-[ "$DRY_RUN" = "true" ] || [ "$DRY_RUN" = "1" ] && DRY_RUN=true || DRY_RUN=false
+if [ "$FORCE" = "true" ]   || [ "$FORCE" = "1" ];   then FORCE=true;  else FORCE=false;  fi
+if [ "$SILENT" = "true" ]  || [ "$SILENT" = "1" ];  then SILENT=true; else SILENT=false; fi
+if [ "$DRY_RUN" = "true" ] || [ "$DRY_RUN" = "1" ]; then DRY_RUN=true; else DRY_RUN=false; fi
 # Experimental defaults to true; only "false"/"0" turn it off
-[ "$INSTALL_EXPERIMENTAL" = "false" ] || [ "$INSTALL_EXPERIMENTAL" = "0" ] && INSTALL_EXPERIMENTAL=false || INSTALL_EXPERIMENTAL=true
+if [ "$INSTALL_EXPERIMENTAL" = "false" ] || [ "$INSTALL_EXPERIMENTAL" = "0" ]; then INSTALL_EXPERIMENTAL=false; else INSTALL_EXPERIMENTAL=true; fi
 
 # Check if scope was explicitly set via env var
 [ -n "${DEVKIT_SCOPE:-}" ] && SCOPE_EXPLICIT=true
@@ -112,7 +112,16 @@ MIN_AITOOLS_CLI_VERSION="1.0.0"
 G='\033[0;32m' Y='\033[1;33m' R='\033[0;31m' BL='\033[0;34m' B='\033[1m' D='\033[2m' N='\033[0m'
 
 # MLflow skills (fetched from mlflow/skills repo; MLFLOW_REF defaults to main — the repo is tagless)
-MLFLOW_SKILLS="agent-evaluation analyze-mlflow-chat-session analyze-mlflow-trace instrumenting-with-mlflow-tracing mlflow-onboarding querying-mlflow-metrics retrieving-mlflow-traces searching-mlflow-docs"
+MLFLOW_SKILLS=(
+    agent-evaluation
+    analyze-mlflow-chat-session
+    analyze-mlflow-trace
+    instrumenting-with-mlflow-tracing
+    mlflow-onboarding
+    querying-mlflow-metrics
+    retrieving-mlflow-traces
+    searching-mlflow-docs
+)
 MLFLOW_BASE_URL="https://raw.githubusercontent.com/mlflow/skills"
 
 # Agent skills (from databricks/databricks-agent-skills, installed and managed by
@@ -120,8 +129,23 @@ MLFLOW_BASE_URL="https://raw.githubusercontent.com/mlflow/skills"
 # The live inventory is discovered at runtime via `databricks aitools list -o json`
 # (see fetch_agent_b_inventory); these lists are the fallback snapshot (v0.2.10),
 # used only when the CLI is unavailable/offline.
-AGENT_B_STABLE_FALLBACK="databricks-agent-bricks databricks-ai-functions databricks-aibi-dashboards databricks-app-design databricks-apps databricks-apps-python databricks-core databricks-dabs databricks-data-discovery databricks-dbsql databricks-docs databricks-execution-compute databricks-iceberg databricks-jobs databricks-lakebase databricks-lakeflow-connect databricks-metric-views databricks-ml-training databricks-mlflow-evaluation databricks-model-serving databricks-pipelines databricks-python-sdk databricks-serverless-migration databricks-spark-structured-streaming databricks-synthetic-data-gen databricks-unity-catalog databricks-unstructured-pdf-generation databricks-vector-search databricks-zerobus-ingest"
-AGENT_B_EXPERIMENTAL_FALLBACK="databricks-ai-runtime databricks-genie spark-python-data-source"
+AGENT_B_STABLE_FALLBACK=(
+    databricks-agent-bricks        databricks-ai-functions        databricks-aibi-dashboards
+    databricks-app-design          databricks-apps                databricks-apps-python
+    databricks-core                databricks-dabs                databricks-data-discovery
+    databricks-dbsql               databricks-docs                databricks-execution-compute
+    databricks-iceberg             databricks-jobs                databricks-lakebase
+    databricks-lakeflow-connect    databricks-metric-views        databricks-ml-training
+    databricks-mlflow-evaluation   databricks-model-serving       databricks-pipelines
+    databricks-python-sdk          databricks-serverless-migration databricks-spark-structured-streaming
+    databricks-synthetic-data-gen  databricks-unity-catalog       databricks-unstructured-pdf-generation
+    databricks-vector-search       databricks-zerobus-ingest
+)
+AGENT_B_EXPERIMENTAL_FALLBACK=(
+    databricks-ai-runtime
+    databricks-genie
+    spark-python-data-source
+)
 # Skills never installed by default (excluded from "all" and profile selections;
 # still installable via an explicit --skills request). Space-separated; empty = none.
 # NOTE: keep this empty unless a skill genuinely shouldn't ship by default — the
@@ -252,8 +276,32 @@ while [ $# -gt 0 ]; do
             echo "  databricks-lakebase-autoscale/provisioned -> databricks-lakebase."
             echo ""
             echo "Examples:"
+            echo "  # Basic install (interactive)"
+            echo "  bash <(curl -sL .../install.sh)"
+            echo ""
             echo "  # Using environment variables"
             echo "  DEVKIT_TOOLS=cursor curl -sL .../install.sh | bash"
+            echo ""
+            echo "  # Headless / CI install (fully non-interactive)"
+            echo "  DATABRICKS_TOKEN=\$TOKEN DATABRICKS_HOST=\$HOST \\"
+            echo "    DEVKIT_PROFILE=DEFAULT DEVKIT_SILENT=true DEVKIT_TOOLS=claude \\"
+            echo "    bash <(curl -sL .../install.sh) --yes"
+            echo ""
+            echo "  # Non-interactive with skills profile (data-engineer)"
+            echo "  DEVKIT_PROFILE=DEFAULT DEVKIT_SKILLS_PROFILE=data-engineer \\"
+            echo "    bash <(curl -sL .../install.sh) --yes"
+            echo ""
+            echo "Corporate SSO / restricted environments:"
+            echo "  # If browser-based OAuth fails (SSO, headless server, or VPN-only env),"
+            echo "  # generate a Personal Access Token (PAT) in your Databricks workspace"
+            echo "  # (Settings → Developer → Access tokens) and pass it via env var:"
+            echo "  DATABRICKS_TOKEN=<pat> DATABRICKS_HOST=<workspace-url> \\"
+            echo "    bash <(curl -sL .../install.sh) --yes"
+            echo ""
+            echo "  # Or pre-configure ~/.databrickscfg before running the installer:"
+            echo "  #   [DEFAULT]"
+            echo "  #   host  = https://my-workspace.azuredatabricks.net"
+            echo "  #   token = dapiXXXXXXXXXXXXXXXX"
             echo ""
             exit 0 ;;
         *) die "Unknown option: $1 (use -h for help)" ;;
@@ -272,7 +320,7 @@ _count() { echo $#; }
 # Number of skills the "all" profile installs (excluded agent skills omitted)
 _count_all_skills() {
     local n skill
-    n=$(_count $MLFLOW_SKILLS $AGENT_B_STABLE $AGENT_B_EXPERIMENTAL)
+    n=$(_count "${MLFLOW_SKILLS[@]}" $AGENT_B_STABLE $AGENT_B_EXPERIMENTAL)
     for skill in $AGENT_B_EXCLUDED; do
         _in_list "$skill" "$AGENT_B_STABLE $AGENT_B_EXPERIMENTAL" && n=$((n - 1))
     done
@@ -335,7 +383,7 @@ list_skills_and_exit() {
     echo ""
     echo -e "${B}MLflow Skills${N} (from mlflow/skills repo @ ${MLFLOW_REF})"
     echo "────────────────────────────────"
-    for skill in $MLFLOW_SKILLS; do
+    for skill in "${MLFLOW_SKILLS[@]}"; do
         echo -e "    $skill"
     done
     echo ""
@@ -1262,7 +1310,7 @@ resolve_skills() {
 
     # Bucket one skill name into its source list (fails for unknown names)
     _bucket() {
-        if _in_list "$1" "$MLFLOW_SKILLS"; then
+        if _in_list "$1" "${MLFLOW_SKILLS[*]}"; then
             mlflow_skills="${mlflow_skills:+$mlflow_skills }$1"
         elif _in_list "$1" "$AGENT_B_STABLE $AGENT_B_EXPERIMENTAL"; then
             agent_b_skills="${agent_b_skills:+$agent_b_skills }$1"
@@ -1309,7 +1357,7 @@ resolve_skills() {
 
     # Priority 2: --skills-profile flag or interactive selection
     if [ -z "$SKILLS_PROFILE" ] || [ "$SKILLS_PROFILE" = "all" ]; then
-        mlflow_skills="$MLFLOW_SKILLS"
+        mlflow_skills="${MLFLOW_SKILLS[*]}"
         _default_agent_b
         SELECTED_ALL_AGENT_B=true
         _store_selection
@@ -1322,7 +1370,7 @@ resolve_skills() {
     for profile in $(echo "$SKILLS_PROFILE" | tr ',' ' '); do
         case $profile in
             all)
-                mlflow_skills="$MLFLOW_SKILLS"
+                mlflow_skills="${MLFLOW_SKILLS[*]}"
                 agent_b_skills=""
                 _default_agent_b
                 SELECTED_ALL_AGENT_B=true
@@ -1570,7 +1618,7 @@ prompt_custom_skills() {
     # automatically. Order: agent skills (stable, then experimental), then MLflow.
     local -a items=()
     local seen="" skill meta label hint state lock
-    for skill in $AGENT_B_STABLE $AGENT_B_EXPERIMENTAL $MLFLOW_SKILLS; do
+    for skill in $AGENT_B_STABLE $AGENT_B_EXPERIMENTAL "${MLFLOW_SKILLS[@]}"; do
         _in_list "$skill" "$seen" && continue
         seen="${seen:+$seen }$skill"
         meta=$(_skill_meta "$skill")
@@ -1632,8 +1680,8 @@ fetch_agent_b_inventory() {
     fi
 
     if [ -z "$AGENT_B_STABLE" ]; then
-        AGENT_B_STABLE="$AGENT_B_STABLE_FALLBACK"
-        AGENT_B_EXPERIMENTAL="$AGENT_B_EXPERIMENTAL_FALLBACK"
+        AGENT_B_STABLE="${AGENT_B_STABLE_FALLBACK[*]}"
+        AGENT_B_EXPERIMENTAL="${AGENT_B_EXPERIMENTAL_FALLBACK[*]}"
         AGENT_B_RELEASE=""
     fi
 }
@@ -2566,12 +2614,21 @@ prompt_auth() {
     msg "${B}Authentication${N}"
     msg "This will run OAuth login for profile ${B}${BL}$PROFILE${N}"
     msg "${D}A browser window will open for you to authenticate with your Databricks workspace.${N}"
+    msg "${D}If your org uses corporate SSO or a browser cannot open, use a Personal Access Token instead:${N}"
+    msg "${D}  Settings → Developer → Access tokens in your Databricks workspace,${N}"
+    msg "${D}  then set DATABRICKS_TOKEN and DATABRICKS_HOST before running this installer.${N}"
     echo ""
     local run_auth
     run_auth=$(prompt "Run ${B}databricks auth login --profile $PROFILE${N} now? ${D}(y/n)${N}" "y")
     if [ "$run_auth" = "y" ] || [ "$run_auth" = "Y" ] || [ "$run_auth" = "yes" ]; then
         echo ""
-        databricks auth login --profile "$PROFILE"
+        if ! databricks auth login --profile "$PROFILE"; then
+            warn "OAuth login failed — this is expected in some SSO or headless environments."
+            msg  "  Alternatives:"
+            msg  "    • Set DATABRICKS_TOKEN and DATABRICKS_HOST, then re-run the installer"
+            msg  "    • Add credentials to ~/.databrickscfg under [$PROFILE] manually"
+            msg  "    • Try: ${B}${BL}databricks auth login --host <workspace-url> --profile $PROFILE${N}"
+        fi
     fi
 }
 
