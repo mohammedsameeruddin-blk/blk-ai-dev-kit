@@ -19,6 +19,9 @@ set -euo pipefail
 
 ENTERPRISE_NAME="Blackstraw"
 ENTERPRISE_DISPLAY="Blackstraw"
+# Default email hint shown when no git/GitHub email is detected.
+# Change this to match your organisation's email domain.
+ENTERPRISE_DEFAULT_EMAIL="${ENTERPRISE_DEFAULT_EMAIL:-you@blackstraw.ai}"
 
 # =============================================================================
 # ── OUTPUT HELPERS ────────────────────────────────────────────────────────────
@@ -165,7 +168,7 @@ _configure_git_identity() {
     fi
 
     default_name="${current_name:-First Last}"
-    default_email="${current_email:-you@blackstraw.ai}"
+    default_email="${current_email:-$ENTERPRISE_DEFAULT_EMAIL}"
 
     name=$(prompt  "Full name for git config" "$default_name")
     email=$(prompt "${ENTERPRISE_DISPLAY} email for git config" "$default_email")
