@@ -1,6 +1,8 @@
 # Databricks AI Dev Kit
 .ai-dev-kit/
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 .local
 
 # Python

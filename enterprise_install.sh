@@ -151,6 +151,7 @@ PROJECT_DIR=""
 WORKSPACE_URL=""
 MLFLOW_COUNT=0
 AGENT_COUNT=0
+BLK_SKILL_COUNT=0
 
 # =============================================================================
 # ── PARSE FLAGS ───────────────────────────────────────────────────────────────
@@ -638,6 +639,21 @@ if [ "$INSTALL_SKILLS" = true ]; then
     done
     ok "MLflow skills  ($MLFLOW_COUNT installed)"
 
+    # -- Blackstraw enterprise skills bundled in this repo ---------------------
+    BLK_SKILL_COUNT=0
+    _blk_skills_src="$REPO_DIR/.claude/skills"
+    if [ -d "$_blk_skills_src" ]; then
+        for _bdir in "$_blk_skills_src"/blackstraw-*/; do
+            [ -d "$_bdir" ] || continue
+            _bname="$(basename "$_bdir")"
+            rm -rf "$SKILLS_DEST/$_bname"
+            cp -r "$_bdir" "$SKILLS_DEST/$_bname"
+            echo "$SKILLS_DEST|$_bname" >> "$_adk/.installed-skills"
+            BLK_SKILL_COUNT=$((BLK_SKILL_COUNT + 1))
+        done
+    fi
+    ok "Blackstraw skills  ($BLK_SKILL_COUNT installed)"
+
     # -- Agent skills via databricks aitools ------------------------------------
     # Follows the official ai-dev-kit flow exactly:
     #   1. Count expected skills from live inventory
@@ -846,6 +862,7 @@ if [ "$SKILLS_ONLY" = true ]; then
     printf "  %-20s %s\n" "Project"           "$PROJECT_DIR"
     printf "  %-20s %s\n" "MLflow skills"     "$MLFLOW_COUNT installed"
     printf "  %-20s %s\n" "Agent skills"      "$AGENT_COUNT installed"
+    printf "  %-20s %s\n" "Blackstraw skills" "$BLK_SKILL_COUNT installed"
     [ "$ENT_SKILL_COUNT" -gt 0 ] && printf "  %-20s %s\n" "Enterprise skills" "$ENT_SKILL_COUNT installed"
 else
     printf "${G}%s${N}\n" "+========================================================+"
@@ -858,6 +875,7 @@ else
     printf "  %-20s %s\n" "Profile"           "$PROFILE"
     printf "  %-20s %s\n" "MLflow skills"     "$MLFLOW_COUNT installed"
     printf "  %-20s %s\n" "Agent skills"      "$AGENT_COUNT installed"
+    printf "  %-20s %s\n" "Blackstraw skills" "$BLK_SKILL_COUNT installed"
     [ "$ENT_SKILL_COUNT" -gt 0 ] && printf "  %-20s %s\n" "Enterprise skills" "$ENT_SKILL_COUNT installed"
     printf "  %-20s %s\n" "MCP config"        "$_MCP_CONFIG"
 fi

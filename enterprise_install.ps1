@@ -124,8 +124,9 @@ $script:PROFILE_PROVIDED = $false
 $script:PROJECT_DIR      = ""
 $script:WORKSPACE_URL    = ""
 
-$MLFLOW_COUNT = 0
-$AGENT_COUNT  = 0
+$MLFLOW_COUNT    = 0
+$AGENT_COUNT     = 0
+$blkSkillCount   = 0
 
 # =============================================================================
 # -- PARSE FLAGS ---------------------------------------------------------------
@@ -717,6 +718,21 @@ if ($script:INSTALL_SKILLS) {
     }
     Write-Ok "MLflow skills  ($MLFLOW_COUNT installed)"
 
+    # -- Blackstraw enterprise skills bundled in this repo ---------------------
+    $blkSkillCount = 0
+    $blkSkillsSrc  = Join-Path $REPO_DIR ".claude\skills"
+    if (Test-Path $blkSkillsSrc) {
+        Get-ChildItem $blkSkillsSrc -Directory | Where-Object { $_.Name -like "blackstraw-*" } | ForEach-Object {
+            $bName = $_.Name
+            $bDest = Join-Path $SKILLS_DEST $bName
+            if (Test-Path $bDest) { Remove-Item $bDest -Recurse -Force -ErrorAction SilentlyContinue }
+            Copy-Item $_.FullName $bDest -Recurse -Force
+            Add-Content -Path (Join-Path $_adk ".installed-skills") -Value "$SKILLS_DEST|$bName"
+            $blkSkillCount++
+        }
+    }
+    Write-Ok "Blackstraw skills  ($blkSkillCount installed)"
+
     # -- Agent skills via databricks aitools ------------------------------------
     # Follows the official ai-dev-kit flow exactly:
     #   1. Count expected skills from live inventory
@@ -945,6 +961,7 @@ if ($script:SKILLS_ONLY) {
     Write-Host ("  {0,-20} {1}" -f "Project",           $script:PROJECT_DIR)
     Write-Host ("  {0,-20} {1}" -f "MLflow skills",     "$MLFLOW_COUNT installed")
     Write-Host ("  {0,-20} {1}" -f "Agent skills",      "$AGENT_COUNT installed")
+    Write-Host ("  {0,-20} {1}" -f "Blackstraw skills", "$blkSkillCount installed")
     if ($entSkillCount -gt 0) { Write-Host ("  {0,-20} {1}" -f "Enterprise skills", "$entSkillCount installed") }
 } else {
     Write-Host "+========================================================+" -ForegroundColor Green
