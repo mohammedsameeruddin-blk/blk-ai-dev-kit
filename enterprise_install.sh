@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 #
-# Blackstraw Enterprise AI Dev Kit — Installer (macOS / Linux)
+# Blackstraw Enterprise AI Dev Kit — Installer v2 (macOS / Linux)
 #
 # 6-step setup: project dir, prerequisites, workspace/profile, MCP server,
-# skills (all upstream profiles), Claude settings + Genie sync, state files.
+# skills (all upstream profiles + UC Skill Registry), Claude settings + Genie sync,
+# state files.
+#
+# v2 change: enterprise private skills are now served from Unity Catalog via
+# the databricks-skill-registry MCP server (ucode). No private Git repo clone.
 #
 # Usage:
-#   bash enterprise_install.sh
-#   bash enterprise_install.sh --profile NAME
-#   bash enterprise_install.sh --skills-only   # update skills only (Steps 2 + 5)
-#   bash enterprise_install.sh --force
-#   bash enterprise_install.sh --global        # install globally (not per-project)
-#   bash <(curl -sL https://raw.githubusercontent.com/blackstraw-ai/ai-dev-kit/main/enterprise_install.sh)
+#   bash enterprise_install_v2.sh
+#   bash enterprise_install_v2.sh --profile NAME
+#   bash enterprise_install_v2.sh --skills-only   # update skills only (Steps 2 + 5)
+#   bash enterprise_install_v2.sh --force
+#   bash enterprise_install_v2.sh --global        # install globally (not per-project)
+#   bash <(curl -sL https://raw.githubusercontent.com/blackstraw-ai/ai-dev-kit/main/enterprise_install_v2.sh)
 #
 # Options:
 #   -p, --profile NAME     Databricks profile (default: DEFAULT)
@@ -80,32 +84,15 @@ AGENT_B_EXPERIMENTAL_FALLBACK=(
 )
 _count() { echo $#; }
 
-# Enterprise-specific private skills repo.
-# Set to the SSH clone URL of your private skills repository.
-# Leave empty ("") to skip enterprise skills installation.
-#
-# Examples:
-#   ENTERPRISE_SKILLS_REPO="git@github.com:blackstraw-ai/blackstraw-data-architecture-skills.git"
-#   ENTERPRISE_SKILLS_REPO="git@github.com:blackstraw-ai/DAIA-data-architecture-skills.git"
-#
-ENTERPRISE_SKILLS_REPO=""
-
-# Subfolder inside the repo that contains the skill folders (leave empty = repo root).
-# Example: "blackstraw-data-architecture-skills"
-ENTERPRISE_SKILLS_REPO_SUBPATH=""
-
 # =============================================================================
 # ── PATHS  (derived — do not edit) ───────────────────────────────────────────
 # =============================================================================
 
 INSTALL_DIR="${AIDEVKIT_HOME:-$HOME/.ai-dev-kit}"
 
-# Directory where the skills repo will be cloned locally (derived from INSTALL_DIR above).
-ENTERPRISE_SKILLS_REPO_DIR="$INSTALL_DIR/${ENTERPRISE_NAME}-skills-repo"
-
 _raw_base="${ENTERPRISE_KIT_REPO%.git}"
 _raw_base="${_raw_base/github.com/raw.githubusercontent.com}"
-_RERUN_CMD="bash <(curl -sL ${_raw_base}/${ENTERPRISE_KIT_BRANCH}/enterprise_install.sh)"
+_RERUN_CMD="bash <(curl -sL ${_raw_base}/${ENTERPRISE_KIT_BRANCH}/enterprise_install_v2.sh)"
 
 # Detect whether running from a local clone or via curl/pipe
 _local_repo=""
@@ -151,6 +138,8 @@ PROJECT_DIR=""
 WORKSPACE_URL=""
 MLFLOW_COUNT=0
 AGENT_COUNT=0
+_UC_SCHEMA=""
+_UC_REGISTRY_OK=false
 
 # =============================================================================
 # ── PARSE FLAGS ───────────────────────────────────────────────────────────────
@@ -166,9 +155,9 @@ while [ $# -gt 0 ]; do
         -f|--force)       FORCE=true; shift ;;
         -h|--help)
             echo ""
-            echo "${ENTERPRISE_DISPLAY} Enterprise AI Dev Kit Installer"
+            echo "${ENTERPRISE_DISPLAY} Enterprise AI Dev Kit Installer v2"
             echo ""
-            echo "Usage: bash enterprise_install.sh [OPTIONS]"
+            echo "Usage: bash enterprise_install_v2.sh [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  -p, --profile NAME     Databricks profile (default: DEFAULT)"
@@ -334,7 +323,7 @@ except: pass
 # =============================================================================
 
 echo ""
-_banner_title="   ${ENTERPRISE_DISPLAY} — Enterprise AI Dev Kit Installer"
+_banner_title="   ${ENTERPRISE_DISPLAY} — Enterprise AI Dev Kit Installer v2"
 _banner_inner=56
 _title_len=${#_banner_title}
 [ "$_title_len" -gt "$_banner_inner" ] && _banner_inner=$(( _title_len + 2 ))
@@ -704,64 +693,107 @@ if [ "$INSTALL_SKILLS" = true ]; then
         warn "  Then re-run: $_RERUN_CMD"
     fi
 
-    # -- Enterprise private skills repo ----------------------------------------
-    ENT_SKILL_COUNT=0
-    if [ -n "$ENTERPRISE_SKILLS_REPO" ]; then
-        msg "Fetching enterprise skills from: $ENTERPRISE_SKILLS_REPO"
+    # -- UC Skill Registry via ucode -------------------------------------------
+    # Discovers which catalog.schema in this workspace contains UC skills,
+    # then wires the databricks-skill-registry MCP server into .mcp.json so
+    # enterprise skills load live without any local file copies.
+    msg "Setting up UC Skill Registry..."
 
-        # Try SSH first, fall back to HTTPS
-        _ent_clone_url="$ENTERPRISE_SKILLS_REPO"
-        _ssh_check="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true)"
-        if ! echo "$_ssh_check" | grep -q "Hi "; then
-            _ent_clone_url="$(echo "$ENTERPRISE_SKILLS_REPO" | sed 's|git@github.com:|https://github.com/|')"
-            msg "SSH not available — using HTTPS: $_ent_clone_url"
+    _ucode_ok=false
+    if command -v ucode >/dev/null 2>&1; then
+        ok "ucode $(ucode --version 2>/dev/null | head -1 || echo 'found')"
+        _ucode_ok=true
+    elif command -v uv >/dev/null 2>&1; then
+        msg "Installing ucode..."
+        uv tool install git+https://github.com/databricks/ucode --quiet 2>/dev/null \
+            && ok "ucode installed" && _ucode_ok=true \
+            || warn "ucode install failed — UC skill registry skipped"
+    else
+        warn "uv not found — cannot install ucode, UC skill registry skipped"
+    fi
+
+    if [ "$_ucode_ok" = true ] && command -v databricks >/dev/null 2>&1; then
+        # In --skills-only mode Step 3 is skipped; derive workspace URL from profile config
+        if [ -z "$WORKSPACE_URL" ] && [ -f "$HOME/.databrickscfg" ]; then
+            _in_p=false
+            while IFS= read -r _l; do
+                [[ "$_l" =~ ^\[${PROFILE}\]$ ]] && _in_p=true && continue
+                [[ "$_l" =~ ^\[             ]] && _in_p=false
+                [ "$_in_p" = true ] && [[ "$_l" =~ ^host[[:space:]]*=[[:space:]]*(.+)$ ]] \
+                    && WORKSPACE_URL="${BASH_REMATCH[1]%/}" && break
+            done < "$HOME/.databrickscfg"
         fi
 
-        # Check the repo is reachable before cloning
-        _ent_reachable=false
-        if git ls-remote --exit-code "$_ent_clone_url" HEAD >/dev/null 2>&1; then
-            _ent_reachable=true
-        fi
+        # Auto-discover schemas that contain UC skills (Option C)
+        msg "Scanning workspace for UC skill schemas..."
+        _discovered="$(python3 - "$PROFILE" 2>/dev/null <<'PYEOF'
+import subprocess, json, sys
+profile = sys.argv[1]
+def dbx(path):
+    r = subprocess.run(["databricks","api","get",path,"--profile",profile],
+                       capture_output=True, text=True, timeout=15)
+    if r.returncode != 0: return None
+    try: return json.loads(r.stdout)
+    except: return None
+cats = (dbx("/api/2.1/unity-catalog/catalogs") or {}).get("catalogs", [])
+found = []
+for c in cats:
+    cn = c.get("name","")
+    for s in (dbx(f"/api/2.1/unity-catalog/schemas?catalog_name={cn}") or {}).get("schemas",[]):
+        sn = s.get("name","")
+        if sn == "information_schema": continue
+        if (dbx(f"/api/2.1/unity-catalog/skills?parent=schemas/{cn}.{sn}") or {}).get("skills"):
+            found.append(f"{cn}.{sn}")
+print("\n".join(found))
+PYEOF
+)" || true
 
-        if [ "$_ent_reachable" = true ]; then
-            if [ -d "$ENTERPRISE_SKILLS_REPO_DIR/.git" ]; then
-                _cur_remote="$(git -C "$ENTERPRISE_SKILLS_REPO_DIR" remote get-url origin 2>/dev/null || true)"
-                if [ "$_cur_remote" != "$_ent_clone_url" ]; then
-                    rm -rf "$ENTERPRISE_SKILLS_REPO_DIR"
-                fi
-            fi
+        _schema_count=0
+        [ -n "$_discovered" ] && _schema_count="$(echo "$_discovered" | wc -l | tr -d ' ')"
 
-            if [ -d "$ENTERPRISE_SKILLS_REPO_DIR/.git" ]; then
-                git -C "$ENTERPRISE_SKILLS_REPO_DIR" fetch -q --depth 1 origin HEAD 2>/dev/null \
-                    && git -C "$ENTERPRISE_SKILLS_REPO_DIR" reset -q --hard FETCH_HEAD 2>/dev/null \
-                    || warn "Could not update enterprise skills repo — using cached version"
-            else
-                git clone -q --depth 1 "$_ent_clone_url" "$ENTERPRISE_SKILLS_REPO_DIR" 2>/dev/null \
-                    || { warn "Could not clone enterprise skills repo"; _ent_reachable=false; }
-            fi
-
-            if [ "$_ent_reachable" = true ]; then
-                _ent_src="$ENTERPRISE_SKILLS_REPO_DIR"
-                [ -n "$ENTERPRISE_SKILLS_REPO_SUBPATH" ] && _ent_src="$_ent_src/$ENTERPRISE_SKILLS_REPO_SUBPATH"
-
-                if [ -d "$_ent_src" ]; then
-                    for _edir in "$_ent_src"/*/; do
-                        _ename="$(basename "$_edir")"
-                        [ "$_ename" = "TEMPLATE" ] && continue
-                        rm -rf "$SKILLS_DEST/$_ename"
-                        cp -r "$_edir" "$SKILLS_DEST/$_ename"
-                        echo "$SKILLS_DEST|$_ename" >> "$_adk/.installed-skills"
-                        ENT_SKILL_COUNT=$((ENT_SKILL_COUNT + 1))
-                    done
-                    ok "Enterprise skills  ($ENT_SKILL_COUNT installed)"
-                else
-                    warn "Enterprise skills subfolder not found: $_ent_src"
-                fi
-            fi
+        if [ "$_schema_count" -eq 0 ] 2>/dev/null; then
+            warn "No UC skill schemas found in this workspace"
+            _UC_SCHEMA="$(prompt "Enter skill schema manually (catalog.schema) or leave blank to skip" "")"
+        elif [ "$_schema_count" -eq 1 ]; then
+            _UC_SCHEMA="$_discovered"
+            ok "Found skill schema: $_UC_SCHEMA"
+            _confirm="$(prompt "Use this schema? (y/n)" "y")"
+            [ "$_confirm" != "y" ] && [ "$_confirm" != "Y" ] && _UC_SCHEMA=""
         else
-            warn "Enterprise skills repo not reachable — skipping"
-            warn "  Repo: $ENTERPRISE_SKILLS_REPO"
-            warn "  Configure later and re-run: $_RERUN_CMD --skills-only"
+            _radio_items=()
+            while IFS= read -r _s; do
+                [ -n "$_s" ] && _radio_items+=("$_s|$_s|")
+            done <<< "$_discovered"
+            _radio_items+=("Skip|__SKIP__|do not configure UC skill registry")
+            _UC_SCHEMA="$(radio_select "Choose UC skill schema:" "${_radio_items[@]}")"
+            [ "$_UC_SCHEMA" = "__SKIP__" ] && _UC_SCHEMA=""
+        fi
+
+        if [ -n "$_UC_SCHEMA" ]; then
+            # Merge databricks-skill-registry entry into .mcp.json (same pattern as Step 4)
+            _mcp_fwd="$PROJECT_DIR/.mcp.json"
+            python3 - <<PYEOF
+import json, pathlib
+path = pathlib.Path('${_mcp_fwd}')
+existing = {}
+if path.exists():
+    try: existing = json.loads(path.read_text())
+    except: pass
+existing.setdefault('mcpServers', {})['databricks-skill-registry'] = {
+    'command': 'uvx',
+    'args': ['databricks-skill-registry'],
+    'env': {
+        'DATABRICKS_HOST': '${WORKSPACE_URL}',
+        'DATABRICKS_CONFIG_PROFILE': '${PROFILE}',
+        'SKILL_REGISTRY_SCOPES': '${_UC_SCHEMA}'
+    }
+}
+path.write_text(json.dumps(existing, indent=2) + '\n')
+PYEOF
+            ok "UC Skill Registry  →  $_UC_SCHEMA (live MCP)"
+            _UC_REGISTRY_OK=true
+            # Persist schema so --skills-only re-runs can confirm/update it
+            echo "$_UC_SCHEMA" > "$_adk/.skills-schema"
         fi
     fi
 
@@ -846,7 +878,7 @@ if [ "$SKILLS_ONLY" = true ]; then
     printf "  %-20s %s\n" "Project"           "$PROJECT_DIR"
     printf "  %-20s %s\n" "MLflow skills"     "$MLFLOW_COUNT installed"
     printf "  %-20s %s\n" "Agent skills"      "$AGENT_COUNT installed"
-    [ "$ENT_SKILL_COUNT" -gt 0 ] && printf "  %-20s %s\n" "Enterprise skills" "$ENT_SKILL_COUNT installed"
+    [ "$_UC_REGISTRY_OK" = true ] && printf "  %-20s %s\n" "UC skill registry" "$_UC_SCHEMA (live)"
 else
     printf "${G}%s${N}\n" "+========================================================+"
     printf "${G}%s${N}\n" "|   ✓  Workspace Ready                                   |"
@@ -858,11 +890,12 @@ else
     printf "  %-20s %s\n" "Profile"           "$PROFILE"
     printf "  %-20s %s\n" "MLflow skills"     "$MLFLOW_COUNT installed"
     printf "  %-20s %s\n" "Agent skills"      "$AGENT_COUNT installed"
-    [ "$ENT_SKILL_COUNT" -gt 0 ] && printf "  %-20s %s\n" "Enterprise skills" "$ENT_SKILL_COUNT installed"
+    [ "$_UC_REGISTRY_OK" = true ] && printf "  %-20s %s\n" "UC skill registry" "$_UC_SCHEMA (live)"
     printf "  %-20s %s\n" "MCP config"        "$_MCP_CONFIG"
 fi
 echo ""
 printf "${CY}Next steps:${N}\n"
 printf "  1. Open your project in Claude Code:  ${B}claude %s${N}\n" "$PROJECT_DIR"
 printf "  2. MCP + skills are active — try: \"List my SQL warehouses\"\n"
+[ "$_UC_REGISTRY_OK" = true ] && printf "  3. Enterprise skills live — try: \"List the skills in $_UC_SCHEMA\"\n"
 echo ""
