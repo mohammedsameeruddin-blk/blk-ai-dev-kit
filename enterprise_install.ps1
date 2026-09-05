@@ -1,4 +1,4 @@
-#
+﻿#
 # Blackstraw Enterprise AI Dev Kit — Installer v2 (Windows)
 #
 # 6-step setup: project dir, prerequisites, workspace/profile, MCP server,
@@ -165,7 +165,7 @@ function Write-Ok   {
     param([string]$Text)
     if (-not $script:SILENT) {
         Write-Host "  " -NoNewline
-        Write-Host "v" -ForegroundColor Green -NoNewline
+        Write-Host "✓" -ForegroundColor Green -NoNewline
         Write-Host " $Text"
     }
 }
@@ -180,7 +180,7 @@ function Write-Warn {
 function Write-Die {
     param([string]$Text)
     Write-Host "  " -NoNewline
-    Write-Host "x" -ForegroundColor Red -NoNewline
+    Write-Host "✗" -ForegroundColor Red -NoNewline
     Write-Host " $Text"
     Write-Host ""
     exit 1
@@ -189,9 +189,9 @@ function Write-Step {
     param([string]$Text)
     if (-not $script:SILENT) {
         Write-Host ""
-        Write-Host "--------------------------------------------------------" -ForegroundColor Cyan
+        Write-Host "────────────────────────────────────────────────────────" -ForegroundColor Cyan
         Write-Host "  $Text" -ForegroundColor White
-        Write-Host "--------------------------------------------------------" -ForegroundColor Cyan
+        Write-Host "────────────────────────────────────────────────────────" -ForegroundColor Cyan
         Write-Host ""
     }
 }
@@ -338,16 +338,16 @@ function Select-Radio {
 # =============================================================================
 
 Write-Host ""
-$_bannerTitle = "   $ENTERPRISE_DISPLAY - Enterprise AI Dev Kit Installer v2"
+$_bannerTitle = "   $ENTERPRISE_DISPLAY — Enterprise AI Dev Kit Installer v2"
 $_inner       = [Math]::Max(56, $_bannerTitle.Length + 2)
-$_border      = '=' * $_inner
+$_border      = '═' * $_inner
 $_pad         = $_inner - $_bannerTitle.Length
 $_padded      = $_bannerTitle + (' ' * $_pad)
-Write-Host "+${_border}+" -ForegroundColor Cyan
-Write-Host "|" -ForegroundColor Cyan -NoNewline
+Write-Host "╔${_border}╗" -ForegroundColor Cyan
+Write-Host "║" -ForegroundColor Cyan -NoNewline
 Write-Host $_padded -NoNewline
-Write-Host "|" -ForegroundColor Cyan
-Write-Host "+${_border}+" -ForegroundColor Cyan
+Write-Host "║" -ForegroundColor Cyan
+Write-Host "╚${_border}╝" -ForegroundColor Cyan
 Write-Host ""
 Write-Warn "NOTE: Do NOT run the official Databricks install.ps1 alongside this script."
 Write-Msg  "  This enterprise installer fully replaces it. Running both will break the MCP config."
@@ -358,7 +358,7 @@ Write-Host ""
 # =============================================================================
 
 if ($_LOCAL_REPO_MODE) {
-    Write-Ok "Using local repo  ->  $REPO_DIR"
+    Write-Ok "Using local repo  →  $REPO_DIR"
 } else {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Host ""
@@ -373,12 +373,12 @@ if ($_LOCAL_REPO_MODE) {
     if (Test-Path (Join-Path $REPO_DIR ".git")) {
         & git -C $REPO_DIR fetch -q --depth 1 origin $ENTERPRISE_KIT_BRANCH 2>&1 | Out-Null
         & git -C $REPO_DIR reset --hard FETCH_HEAD 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit updated  ->  $REPO_DIR" }
+        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit updated  →  $REPO_DIR" }
         else                      { Write-Warn "Could not update enterprise kit — using existing version" }
     } else {
         if (-not (Test-Path $INSTALL_DIR)) { New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null }
         & git clone -q --depth 1 --branch $ENTERPRISE_KIT_BRANCH $ENTERPRISE_KIT_REPO $REPO_DIR 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit ready  ->  $REPO_DIR" }
+        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit ready  →  $REPO_DIR" }
         else {
             $ErrorActionPreference = $prevEAP
             Remove-Item Env:\GIT_HTTP_LOW_SPEED_LIMIT, Env:\GIT_HTTP_LOW_SPEED_TIME -ErrorAction SilentlyContinue
@@ -398,7 +398,7 @@ if ($script:SKILLS_ONLY) {
     $script:PROJECT_DIR = (Get-Location).Path
     Write-Ok "Project dir: $($script:PROJECT_DIR)"
 } else {
-    Write-Step "Step 1 of 6 - Project Directory"
+    Write-Step "Step 1 of 6 — Project Directory"
     $script:PROJECT_DIR = Read-Prompt "Project directory" (Get-Location).Path
     if (-not (Test-Path $script:PROJECT_DIR)) {
         New-Item -ItemType Directory -Path $script:PROJECT_DIR -Force | Out-Null
@@ -415,7 +415,7 @@ Write-Ok "Workspace directories created"
 # -- STEP 2: PREREQUISITES -----------------------------------------------------
 # =============================================================================
 
-Write-Step "Step 2 of 6 - Prerequisites"
+Write-Step "Step 2 of 6 — Prerequisites"
 
 $_PREREQ_SCRIPT = "${_raw_base}/${ENTERPRISE_KIT_BRANCH}/prerequisites.ps1"
 
@@ -450,8 +450,7 @@ if (-not $script:SKILLS_ONLY) {
             Write-Warn "No package manager found — install Databricks CLI manually:"
             Write-Msg  "  https://docs.databricks.com/dev-tools/cli/install.html"
         }
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-                    [System.Environment]::GetEnvironmentVariable("Path","User")
+        $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
         if (Get-Command databricks -ErrorAction SilentlyContinue) {
             Write-Ok "Databricks CLI: $([string](& databricks --version 2>$null | Select-Object -First 1)) (just installed)"
         } else {
@@ -468,7 +467,7 @@ if (-not $script:SKILLS_ONLY) {
 
 if (-not $script:SKILLS_ONLY) {
 
-Write-Step "Step 3 of 6 - Databricks Workspace & Profile"
+Write-Step "Step 3 of 6 — Databricks Workspace & Profile"
 
 # -- Read existing profiles from ~/.databrickscfg -----------------------------
 $dbxCfg       = Join-Path $env:USERPROFILE ".databrickscfg"
@@ -559,7 +558,7 @@ $ErrorActionPreference = $prevEAP
 # =============================================================================
 
 if ($script:INSTALL_MCP) {
-    Write-Step "Step 4 of 6 - Databricks MCP"
+    Write-Step "Step 4 of 6 — Databricks MCP"
     Write-Msg "Setting up Databricks MCP server..."
 
     if (-not (Test-Path (Join-Path $REPO_DIR "databricks-mcp-server"))) {
@@ -593,7 +592,7 @@ if ($script:INSTALL_MCP) {
         Write-Die "MCP server import failed after install."
     }
     $ErrorActionPreference = $prevEAP
-    Write-Ok "MCP server ready  ->  $VENV_DIR"
+    Write-Ok "MCP server ready  →  $VENV_DIR"
 
     # -- Write .mcp.json -------------------------------------------------------
     $MCP_CONFIG    = Join-Path $script:PROJECT_DIR ".mcp.json"
@@ -620,7 +619,7 @@ path.write_text(json.dumps(existing, indent=2) + '\n')
     & $VENV_PYTHON -c $mcpScript 2>&1 | Out-Null
     $mcpWriteOk = $?
     $ErrorActionPreference = $prevEAP
-    if ($mcpWriteOk) { Write-Ok "Databricks MCP  ->  $MCP_CONFIG" }
+    if ($mcpWriteOk) { Write-Ok "Databricks MCP  →  $MCP_CONFIG" }
     else             { Write-Warn "Failed to write Databricks MCP entry — check .mcp.json for JSON errors" }
 }
 
@@ -630,7 +629,7 @@ $MCP_CONFIG = Join-Path $script:PROJECT_DIR ".mcp.json"
 # -- STEP 5: SKILLS + SETTINGS ------------------------------------------------
 # =============================================================================
 
-Write-Step "Step 5 of 6 - Skills + Settings"
+Write-Step "Step 5 of 6 — Skills + Settings"
 
 # -- Write .claude/settings.json -----------------------------------------------
 $SETTINGS_PATH  = Join-Path $script:PROJECT_DIR ".claude\settings.json"
@@ -665,7 +664,7 @@ if (-not $settingsOk -and (Get-Command python3 -ErrorAction SilentlyContinue)) {
     if ($?) { $settingsOk = $true }
 }
 $ErrorActionPreference = $prevEAP
-if ($settingsOk) { Write-Ok ".claude/settings.json  ->  $SETTINGS_PATH" }
+if ($settingsOk) { Write-Ok ".claude/settings.json  →  $SETTINGS_PATH" }
 else             { Write-Warn "Could not write settings.json — Python not found. Install Python and re-run." }
 
 # -- Install skills ------------------------------------------------------------
@@ -767,9 +766,16 @@ if ($script:INSTALL_SKILLS) {
             }
         } else {
             Write-Warn "databricks aitools install failed — agent skills not installed"
-            if ($aitoolsOut -match "429|rate.limit") {
-                Write-Warn "  Cause: GitHub rate limit — wait a minute and re-run with --skills-only"
+            if ($aitoolsOut -match "429|rate.limit|fetch manifest") {
+                Write-Warn "  Cause: GitHub rate limit — wait ~1 min and re-run: $_RERUN_CMD --skills-only"
+            } elseif ($aitoolsOut -match "not found in marketplace|install-failed") {
+                Write-Warn "  Cause: Plugin marketplace mismatch — update and retry:"
+                Write-Warn "    1. claude update"
+                Write-Warn "    2. winget upgrade Databricks.DatabricksCLI"
+                Write-Warn "    3. Re-run: $_RERUN_CMD --skills-only"
             } else {
+                $aitoolsOut.Split("`n") | Where-Object { $_.Trim() } | Select-Object -First 3 |
+                    ForEach-Object { Write-Warn "  $_" }
                 Write-Warn "  Run manually: databricks aitools install --scope project --agents claude-code --experimental -p $($script:PROFILE_)"
             }
             $AGENT_COUNT = 0
@@ -848,14 +854,14 @@ print('\n'.join(found))
 "@
         $prevEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
         $discovered = ""
-        if (Get-Command python3 -ErrorAction SilentlyContinue) {
-            $discovered = (& python3 -c $discoverScript 2>&1) -join "`n"
-        } elseif (Get-Command python -ErrorAction SilentlyContinue) {
-            $discovered = (& python -c $discoverScript 2>&1) -join "`n"
+        if (Test-Path $VENV_PYTHON) {
+            $discovered = (& $VENV_PYTHON -c $discoverScript 2>&1) -join "`n"
+        } elseif (Get-Command py -ErrorAction SilentlyContinue) {
+            $discovered = (& py -c $discoverScript 2>&1) -join "`n"
         }
         $ErrorActionPreference = $prevEAP
 
-        $schemaList = @($discovered.Split("`n") | Where-Object { $_ -match '\.' })
+        $schemaList = @($discovered.Split("`n") | Where-Object { $_ -match '^\s*[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\s*$' })
         $schemaCount = $schemaList.Count
 
         if ($schemaCount -eq 0) {
@@ -878,10 +884,14 @@ print('\n'.join(found))
         }
 
         if ($ucRegistrySchema) {
-            # Merge databricks-skill-registry entry into .mcp.json (same pattern as Step 4)
-            $mcpFwd = ($MCP_CONFIG -replace '\\', '/')
-            $wsUrl  = $script:WORKSPACE_URL
-            $prof   = $script:PROFILE_
+            # Merge databricks-skill-registry entry into .mcp.json using ucode mcp-proxy
+            # (uvx databricks-skill-registry does not exist on PyPI; ucode provides the proxy)
+            $mcpFwd  = ($MCP_CONFIG -replace '\\', '/')
+            $wsUrl   = $script:WORKSPACE_URL.TrimEnd('/')
+            $prof    = $script:PROFILE_
+            $ucodeCmd = Get-Command ucode -ErrorAction SilentlyContinue
+            $ucodeBin = if ($ucodeCmd) { $ucodeCmd.Source -replace '\\', '/' } else { "ucode" }
+            $skillsUrl = "$wsUrl/ai-gateway/skills/?schema=$ucRegistrySchema"
             $regScript = @"
 import json, pathlib
 path = pathlib.Path('$mcpFwd')
@@ -890,13 +900,8 @@ if path.exists():
     try: existing = json.loads(path.read_text())
     except: pass
 existing.setdefault('mcpServers', {})['databricks-skill-registry'] = {
-    'command': 'uvx',
-    'args': ['databricks-skill-registry'],
-    'env': {
-        'DATABRICKS_HOST': '$wsUrl',
-        'DATABRICKS_CONFIG_PROFILE': '$prof',
-        'SKILL_REGISTRY_SCOPES': '$ucRegistrySchema'
-    }
+    'command': '$ucodeBin',
+    'args': ['mcp-proxy', '--url', '$skillsUrl', '--host', '$wsUrl', '--profile', '$prof']
 }
 path.write_text(json.dumps(existing, indent=2) + '\n')
 "@
@@ -906,18 +911,14 @@ path.write_text(json.dumps(existing, indent=2) + '\n')
                 & $VENV_PYTHON -c $regScript 2>&1 | Out-Null
                 if ($?) { $regOk = $true }
             }
-            if (-not $regOk -and (Get-Command python3 -ErrorAction SilentlyContinue)) {
-                & python3 -c $regScript 2>&1 | Out-Null
-                if ($?) { $regOk = $true }
-            }
-            if (-not $regOk -and (Get-Command python -ErrorAction SilentlyContinue)) {
-                & python -c $regScript 2>&1 | Out-Null
+            if (-not $regOk -and (Get-Command py -ErrorAction SilentlyContinue)) {
+                & py -c $regScript 2>&1 | Out-Null
                 if ($?) { $regOk = $true }
             }
             $ErrorActionPreference = $prevEAP
 
             if ($regOk) {
-                Write-Ok "UC Skill Registry  ->  $ucRegistrySchema (live MCP)"
+                Write-Ok "UC Skill Registry  →  $ucRegistrySchema (live MCP)"
                 $ucRegistryOk = $true
                 # Persist schema so --skills-only re-runs can confirm/update it
                 Set-Content -Path (Join-Path $_adk ".skills-schema") -Value $ucRegistrySchema
@@ -959,7 +960,7 @@ path.write_text(json.dumps(existing, indent=2) + '\n')
                 }
                 $ErrorActionPreference = $prevEAP
                 Write-Host ""
-                if ($genieFail -eq 0) { Write-Ok "Skills synced to Databricks Genie  ->  $genieTarget" }
+                if ($genieFail -eq 0) { Write-Ok "Skills synced to Databricks Genie  →  $genieTarget" }
                 else                  { Write-Warn "$genieFail skill(s) failed to sync — check manually at: $genieTarget" }
             }
         }
@@ -972,7 +973,7 @@ path.write_text(json.dumps(existing, indent=2) + '\n')
 
 if (-not $script:SKILLS_ONLY) {
 
-Write-Step "Step 6 of 6 - Workspace"
+Write-Step "Step 6 of 6 — Workspace"
 
 $_adk = Join-Path $script:PROJECT_DIR ".ai-dev-kit"
 if (-not (Test-Path $_adk)) { New-Item -ItemType Directory -Path $_adk -Force | Out-Null }
@@ -1011,7 +1012,7 @@ Write-Ok ".gitignore updated"
 Write-Host ""
 if ($script:SKILLS_ONLY) {
     Write-Host "+========================================================+" -ForegroundColor Green
-    Write-Host "|   v  Skills Updated                                    |" -ForegroundColor Green
+    Write-Host "|   ✓  Skills Updated                                    |" -ForegroundColor Green
     Write-Host "+========================================================+" -ForegroundColor Green
     Write-Host ""
     Write-Host ("  {0,-20} {1}" -f "Project",           $script:PROJECT_DIR)
@@ -1020,7 +1021,7 @@ if ($script:SKILLS_ONLY) {
     if ($ucRegistryOk) { Write-Host ("  {0,-20} {1}" -f "UC skill registry",  "$ucRegistrySchema (live)") }
 } else {
     Write-Host "+========================================================+" -ForegroundColor Green
-    Write-Host "|   v  Workspace Ready                                   |" -ForegroundColor Green
+    Write-Host "|   ✓  Workspace Ready                                   |" -ForegroundColor Green
     Write-Host "+========================================================+" -ForegroundColor Green
     Write-Host ""
     Write-Host ("  {0,-20} {1}" -f "Project",           $script:PROJECT_DIR)
