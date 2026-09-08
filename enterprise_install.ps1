@@ -1,12 +1,16 @@
 ﻿#
-# Blackstraw Enterprise AI Dev Kit — Installer (Windows)
+# Blackstraw Enterprise AI Dev Kit — Installer v2 (Windows)
 #
 # 6-step setup: project dir, prerequisites, workspace/profile, MCP server,
-# skills (all upstream profiles), Claude settings + Genie sync, state files.
+# skills (all upstream profiles + UC Skill Registry), Claude settings + Genie sync,
+# state files.
+#
+# v2 change: enterprise private skills are now served from Unity Catalog via
+# the databricks-skill-registry MCP server (ucode). No private Git repo clone.
 #
 # Usage:
-#   .\enterprise_install.ps1 [OPTIONS]
-#   irm https://raw.githubusercontent.com/blackstraw-ai/ai-dev-kit/main/enterprise_install.ps1 | iex
+#   .\enterprise_install_v2.ps1 [OPTIONS]
+#   irm https://raw.githubusercontent.com/blackstraw-ai/ai-dev-kit/main/enterprise_install_v2.ps1 | iex
 #
 # Options:
 #   --profile / -p NAME      Databricks profile (default: DEFAULT)
@@ -65,31 +69,14 @@ $AGENT_B_STABLE_FALLBACK = @(
 )
 $AGENT_B_EXPERIMENTAL_FALLBACK = @("databricks-ai-runtime","databricks-genie","spark-python-data-source")
 
-# Enterprise-specific private skills repo.
-# Set to the SSH or HTTPS clone URL of your private skills repository.
-# Leave empty ("") to skip enterprise skills installation.
-#
-# Examples:
-#   $ENTERPRISE_SKILLS_REPO = "git@github.com:blackstraw-ai/blackstraw-data-architecture-skills.git"
-#   $ENTERPRISE_SKILLS_REPO = "https://github.com/blackstraw-ai/DAIA-data-architecture-skills.git"
-#
-$ENTERPRISE_SKILLS_REPO = ""
-
-# Subfolder inside the repo that contains the skill folders (leave empty = repo root).
-# Example: "blackstraw-data-architecture-skills"
-$ENTERPRISE_SKILLS_REPO_SUBPATH = ""
-
 # =============================================================================
 # -- PATHS  (derived - do not edit) -------------------------------------------
 # =============================================================================
 
 $INSTALL_DIR  = if ($env:AIDEVKIT_HOME) { $env:AIDEVKIT_HOME } else { Join-Path $env:USERPROFILE ".ai-dev-kit" }
 
-# Directory where the skills repo will be cloned locally (derived from $INSTALL_DIR above).
-$ENTERPRISE_SKILLS_REPO_DIR = Join-Path $INSTALL_DIR "${ENTERPRISE_NAME}-skills-repo"
-
 $_raw_base    = $ENTERPRISE_KIT_REPO -replace '\.git$', '' -replace 'github\.com', 'raw.githubusercontent.com'
-$_RERUN_CMD   = "`$env:DEVKIT_SKILLS_ONLY='true'; irm ${_raw_base}/${ENTERPRISE_KIT_BRANCH}/enterprise_install.ps1 | iex"
+$_RERUN_CMD   = "`$env:DEVKIT_SKILLS_ONLY='true'; irm ${_raw_base}/${ENTERPRISE_KIT_BRANCH}/enterprise_install_v2.ps1 | iex"
 
 # Detect local repo vs irm/pipe execution
 $_LOCAL_REPO_MODE = $false
@@ -124,8 +111,10 @@ $script:PROFILE_PROVIDED = $false
 $script:PROJECT_DIR      = ""
 $script:WORKSPACE_URL    = ""
 
-$MLFLOW_COUNT = 0
-$AGENT_COUNT  = 0
+$MLFLOW_COUNT    = 0
+$AGENT_COUNT     = 0
+$ucRegistryOk    = $false
+$ucRegistrySchema = ""
 
 # =============================================================================
 # -- PARSE FLAGS ---------------------------------------------------------------
@@ -145,9 +134,9 @@ while ($i -lt $args.Count) {
         '^(-f|--force)$'      { $script:FORCE = $true; $i++ }
         '^(-h|--help)$' {
             Write-Host ""
-            Write-Host "$ENTERPRISE_DISPLAY Enterprise AI Dev Kit Installer"
+            Write-Host "$ENTERPRISE_DISPLAY Enterprise AI Dev Kit Installer v2"
             Write-Host ""
-            Write-Host "Usage: .\enterprise_install.ps1 [OPTIONS]"
+            Write-Host "Usage: .\enterprise_install_v2.ps1 [OPTIONS]"
             Write-Host ""
             Write-Host "Options:"
             Write-Host "  -p, --profile NAME     Databricks profile (default: DEFAULT)"
@@ -176,7 +165,7 @@ function Write-Ok   {
     param([string]$Text)
     if (-not $script:SILENT) {
         Write-Host "  " -NoNewline
-        Write-Host "v" -ForegroundColor Green -NoNewline
+        Write-Host "✓" -ForegroundColor Green -NoNewline
         Write-Host " $Text"
     }
 }
@@ -191,7 +180,7 @@ function Write-Warn {
 function Write-Die {
     param([string]$Text)
     Write-Host "  " -NoNewline
-    Write-Host "x" -ForegroundColor Red -NoNewline
+    Write-Host "✗" -ForegroundColor Red -NoNewline
     Write-Host " $Text"
     Write-Host ""
     exit 1
@@ -200,9 +189,9 @@ function Write-Step {
     param([string]$Text)
     if (-not $script:SILENT) {
         Write-Host ""
-        Write-Host "--------------------------------------------------------" -ForegroundColor Cyan
+        Write-Host "────────────────────────────────────────────────────────" -ForegroundColor Cyan
         Write-Host "  $Text" -ForegroundColor White
-        Write-Host "--------------------------------------------------------" -ForegroundColor Cyan
+        Write-Host "────────────────────────────────────────────────────────" -ForegroundColor Cyan
         Write-Host ""
     }
 }
@@ -349,16 +338,16 @@ function Select-Radio {
 # =============================================================================
 
 Write-Host ""
-$_bannerTitle = "   $ENTERPRISE_DISPLAY - Enterprise AI Dev Kit Installer"
+$_bannerTitle = "   $ENTERPRISE_DISPLAY — Enterprise AI Dev Kit Installer v2"
 $_inner       = [Math]::Max(56, $_bannerTitle.Length + 2)
-$_border      = '=' * $_inner
+$_border      = '═' * $_inner
 $_pad         = $_inner - $_bannerTitle.Length
 $_padded      = $_bannerTitle + (' ' * $_pad)
-Write-Host "+${_border}+" -ForegroundColor Cyan
-Write-Host "|" -ForegroundColor Cyan -NoNewline
+Write-Host "╔${_border}╗" -ForegroundColor Cyan
+Write-Host "║" -ForegroundColor Cyan -NoNewline
 Write-Host $_padded -NoNewline
-Write-Host "|" -ForegroundColor Cyan
-Write-Host "+${_border}+" -ForegroundColor Cyan
+Write-Host "║" -ForegroundColor Cyan
+Write-Host "╚${_border}╝" -ForegroundColor Cyan
 Write-Host ""
 Write-Warn "NOTE: Do NOT run the official Databricks install.ps1 alongside this script."
 Write-Msg  "  This enterprise installer fully replaces it. Running both will break the MCP config."
@@ -369,7 +358,7 @@ Write-Host ""
 # =============================================================================
 
 if ($_LOCAL_REPO_MODE) {
-    Write-Ok "Using local repo  ->  $REPO_DIR"
+    Write-Ok "Using local repo  →  $REPO_DIR"
 } else {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Host ""
@@ -384,12 +373,12 @@ if ($_LOCAL_REPO_MODE) {
     if (Test-Path (Join-Path $REPO_DIR ".git")) {
         & git -C $REPO_DIR fetch -q --depth 1 origin $ENTERPRISE_KIT_BRANCH 2>&1 | Out-Null
         & git -C $REPO_DIR reset --hard FETCH_HEAD 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit updated  ->  $REPO_DIR" }
+        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit updated  →  $REPO_DIR" }
         else                      { Write-Warn "Could not update enterprise kit — using existing version" }
     } else {
         if (-not (Test-Path $INSTALL_DIR)) { New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null }
         & git clone -q --depth 1 --branch $ENTERPRISE_KIT_BRANCH $ENTERPRISE_KIT_REPO $REPO_DIR 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit ready  ->  $REPO_DIR" }
+        if ($LASTEXITCODE -eq 0) { Write-Ok "Enterprise kit ready  →  $REPO_DIR" }
         else {
             $ErrorActionPreference = $prevEAP
             Remove-Item Env:\GIT_HTTP_LOW_SPEED_LIMIT, Env:\GIT_HTTP_LOW_SPEED_TIME -ErrorAction SilentlyContinue
@@ -409,7 +398,7 @@ if ($script:SKILLS_ONLY) {
     $script:PROJECT_DIR = (Get-Location).Path
     Write-Ok "Project dir: $($script:PROJECT_DIR)"
 } else {
-    Write-Step "Step 1 of 6 - Project Directory"
+    Write-Step "Step 1 of 6 — Project Directory"
     $script:PROJECT_DIR = Read-Prompt "Project directory" (Get-Location).Path
     if (-not (Test-Path $script:PROJECT_DIR)) {
         New-Item -ItemType Directory -Path $script:PROJECT_DIR -Force | Out-Null
@@ -426,7 +415,7 @@ Write-Ok "Workspace directories created"
 # -- STEP 2: PREREQUISITES -----------------------------------------------------
 # =============================================================================
 
-Write-Step "Step 2 of 6 - Prerequisites"
+Write-Step "Step 2 of 6 — Prerequisites"
 
 $_PREREQ_SCRIPT = "${_raw_base}/${ENTERPRISE_KIT_BRANCH}/prerequisites.ps1"
 
@@ -461,8 +450,7 @@ if (-not $script:SKILLS_ONLY) {
             Write-Warn "No package manager found — install Databricks CLI manually:"
             Write-Msg  "  https://docs.databricks.com/dev-tools/cli/install.html"
         }
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-                    [System.Environment]::GetEnvironmentVariable("Path","User")
+        $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
         if (Get-Command databricks -ErrorAction SilentlyContinue) {
             Write-Ok "Databricks CLI: $([string](& databricks --version 2>$null | Select-Object -First 1)) (just installed)"
         } else {
@@ -479,7 +467,7 @@ if (-not $script:SKILLS_ONLY) {
 
 if (-not $script:SKILLS_ONLY) {
 
-Write-Step "Step 3 of 6 - Databricks Workspace & Profile"
+Write-Step "Step 3 of 6 — Databricks Workspace & Profile"
 
 # -- Read existing profiles from ~/.databrickscfg -----------------------------
 $dbxCfg       = Join-Path $env:USERPROFILE ".databrickscfg"
@@ -570,7 +558,7 @@ $ErrorActionPreference = $prevEAP
 # =============================================================================
 
 if ($script:INSTALL_MCP) {
-    Write-Step "Step 4 of 6 - Databricks MCP"
+    Write-Step "Step 4 of 6 — Databricks MCP"
     Write-Msg "Setting up Databricks MCP server..."
 
     if (-not (Test-Path (Join-Path $REPO_DIR "databricks-mcp-server"))) {
@@ -604,7 +592,7 @@ if ($script:INSTALL_MCP) {
         Write-Die "MCP server import failed after install."
     }
     $ErrorActionPreference = $prevEAP
-    Write-Ok "MCP server ready  ->  $VENV_DIR"
+    Write-Ok "MCP server ready  →  $VENV_DIR"
 
     # -- Write .mcp.json -------------------------------------------------------
     $MCP_CONFIG    = Join-Path $script:PROJECT_DIR ".mcp.json"
@@ -631,7 +619,7 @@ path.write_text(json.dumps(existing, indent=2) + '\n')
     & $VENV_PYTHON -c $mcpScript 2>&1 | Out-Null
     $mcpWriteOk = $?
     $ErrorActionPreference = $prevEAP
-    if ($mcpWriteOk) { Write-Ok "Databricks MCP  ->  $MCP_CONFIG" }
+    if ($mcpWriteOk) { Write-Ok "Databricks MCP  →  $MCP_CONFIG" }
     else             { Write-Warn "Failed to write Databricks MCP entry — check .mcp.json for JSON errors" }
 }
 
@@ -641,7 +629,7 @@ $MCP_CONFIG = Join-Path $script:PROJECT_DIR ".mcp.json"
 # -- STEP 5: SKILLS + SETTINGS ------------------------------------------------
 # =============================================================================
 
-Write-Step "Step 5 of 6 - Skills + Settings"
+Write-Step "Step 5 of 6 — Skills + Settings"
 
 # -- Write .claude/settings.json -----------------------------------------------
 $SETTINGS_PATH  = Join-Path $script:PROJECT_DIR ".claude\settings.json"
@@ -676,7 +664,7 @@ if (-not $settingsOk -and (Get-Command python3 -ErrorAction SilentlyContinue)) {
     if ($?) { $settingsOk = $true }
 }
 $ErrorActionPreference = $prevEAP
-if ($settingsOk) { Write-Ok ".claude/settings.json  ->  $SETTINGS_PATH" }
+if ($settingsOk) { Write-Ok ".claude/settings.json  →  $SETTINGS_PATH" }
 else             { Write-Warn "Could not write settings.json — Python not found. Install Python and re-run." }
 
 # -- Install skills ------------------------------------------------------------
@@ -753,7 +741,7 @@ if ($script:INSTALL_SKILLS) {
             $ErrorActionPreference = $prevEAP
         }
 
-            # Install agent skills as a Claude Code plugin (+ experimental skills)
+        # Install agent skills as a Claude Code plugin (+ experimental skills)
         $prevEAP    = $ErrorActionPreference; $ErrorActionPreference = "Continue"
         $aitoolsOut = (& databricks aitools install --scope project --agents claude-code --experimental -p $script:PROFILE_ 2>&1) -join "`n"
         $aitoolsRc  = $LASTEXITCODE
@@ -778,9 +766,16 @@ if ($script:INSTALL_SKILLS) {
             }
         } else {
             Write-Warn "databricks aitools install failed — agent skills not installed"
-            if ($aitoolsOut -match "429|rate.limit") {
-                Write-Warn "  Cause: GitHub rate limit — wait a minute and re-run with --skills-only"
+            if ($aitoolsOut -match "429|rate.limit|fetch manifest") {
+                Write-Warn "  Cause: GitHub rate limit — wait ~1 min and re-run: $_RERUN_CMD --skills-only"
+            } elseif ($aitoolsOut -match "not found in marketplace|install-failed") {
+                Write-Warn "  Cause: Plugin marketplace mismatch — update and retry:"
+                Write-Warn "    1. claude update"
+                Write-Warn "    2. winget upgrade Databricks.DatabricksCLI"
+                Write-Warn "    3. Re-run: $_RERUN_CMD --skills-only"
             } else {
+                $aitoolsOut.Split("`n") | Where-Object { $_.Trim() } | Select-Object -First 3 |
+                    ForEach-Object { Write-Warn "  $_" }
                 Write-Warn "  Run manually: databricks aitools install --scope project --agents claude-code --experimental -p $($script:PROFILE_)"
             }
             $AGENT_COUNT = 0
@@ -792,66 +787,144 @@ if ($script:INSTALL_SKILLS) {
         Write-Warn "  Then re-run: $_RERUN_CMD"
     }
 
-    # -- Enterprise private skills repo ----------------------------------------
-    $entSkillCount = 0
-    if ($ENTERPRISE_SKILLS_REPO) {
-        Write-Msg "Fetching enterprise skills from: $ENTERPRISE_SKILLS_REPO"
+    # -- UC Skill Registry via ucode -------------------------------------------
+    # Discovers which catalog.schema in this workspace contains UC skills,
+    # then wires the databricks-skill-registry MCP server into .mcp.json so
+    # enterprise skills load live without any local file copies.
+    Write-Msg "Setting up UC Skill Registry..."
 
-        # Try SSH; fall back to HTTPS
-        $entCloneUrl = $ENTERPRISE_SKILLS_REPO
-        $prevEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-        $sshCheck = (& ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1) -join ""
-        $ErrorActionPreference = $prevEAP
-        if ($sshCheck -notmatch "Hi ") {
-            $entCloneUrl = $ENTERPRISE_SKILLS_REPO -replace '^git@github\.com:', 'https://github.com/'
-            Write-Msg "SSH not available — using HTTPS: $entCloneUrl"
+    $ucodeOk = $false
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    if (Get-Command ucode -ErrorAction SilentlyContinue) {
+        $ucodeVer = (& ucode --version 2>&1) -join "" | Select-String -Pattern '\d+\.\d+' | ForEach-Object { $_.Matches[0].Value }
+        Write-Ok "ucode $ucodeVer"
+        $ucodeOk = $true
+    } elseif (Get-Command uv -ErrorAction SilentlyContinue) {
+        Write-Msg "Installing ucode..."
+        & uv tool install "git+https://github.com/databricks/ucode" --quiet 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0 -and (Get-Command ucode -ErrorAction SilentlyContinue)) {
+            Write-Ok "ucode installed"
+            $ucodeOk = $true
+        } else {
+            Write-Warn "ucode install failed — UC skill registry skipped"
+        }
+    } else {
+        Write-Warn "uv not found — cannot install ucode, UC skill registry skipped"
+    }
+    $ErrorActionPreference = $prevEAP
+
+    if ($ucodeOk -and (Get-Command databricks -ErrorAction SilentlyContinue)) {
+        # In --skills-only mode Step 3 is skipped; derive workspace URL from profile config
+        if ([string]::IsNullOrEmpty($script:WORKSPACE_URL)) {
+            $dbxCfgPath = Join-Path $env:USERPROFILE ".databrickscfg"
+            if (Test-Path $dbxCfgPath) {
+                $inPro = $false
+                foreach ($cfgLine in (Get-Content $dbxCfgPath)) {
+                    if ($cfgLine -match "^\[$([regex]::Escape($script:PROFILE_))\]$") { $inPro = $true }
+                    elseif ($cfgLine -match '^\[') { $inPro = $false }
+                    elseif ($inPro -and $cfgLine -match '^host\s*=\s*(.+)$') {
+                        $script:WORKSPACE_URL = $Matches[1].Trim().TrimEnd('/')
+                        break
+                    }
+                }
+            }
         }
 
-        # Check reachability
+        # Auto-discover schemas that contain UC skills (Option C)
+        Write-Msg "Scanning workspace for UC skill schemas..."
+        $discoverScript = @"
+import subprocess, json, sys
+profile = '$($script:PROFILE_)'
+def dbx(path):
+    r = subprocess.run(['databricks','api','get',path,'--profile',profile],
+                       capture_output=True, text=True, timeout=15)
+    if r.returncode != 0: return None
+    try: return json.loads(r.stdout)
+    except: return None
+cats = (dbx('/api/2.1/unity-catalog/catalogs') or {}).get('catalogs', [])
+found = []
+for c in cats:
+    cn = c.get('name','')
+    for s in (dbx(f'/api/2.1/unity-catalog/schemas?catalog_name={cn}') or {}).get('schemas',[]):
+        sn = s.get('name','')
+        if sn == 'information_schema': continue
+        if (dbx(f'/api/2.1/unity-catalog/skills?parent=schemas/{cn}.{sn}') or {}).get('skills'):
+            found.append(f'{cn}.{sn}')
+print('\n'.join(found))
+"@
         $prevEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-        & git ls-remote --exit-code $entCloneUrl HEAD 2>&1 | Out-Null
-        $entReachable = ($LASTEXITCODE -eq 0)
+        $discovered = ""
+        if (Test-Path $VENV_PYTHON) {
+            $discovered = (& $VENV_PYTHON -c $discoverScript 2>&1) -join "`n"
+        } elseif (Get-Command py -ErrorAction SilentlyContinue) {
+            $discovered = (& py -c $discoverScript 2>&1) -join "`n"
+        }
         $ErrorActionPreference = $prevEAP
 
-        if ($entReachable) {
-            $repoGitDir = Join-Path $ENTERPRISE_SKILLS_REPO_DIR ".git"
-            if (Test-Path $repoGitDir) {
-                $curRemote = (& git -C $ENTERPRISE_SKILLS_REPO_DIR remote get-url origin 2>&1) -join ""
-                if ($curRemote -ne $entCloneUrl) { Remove-Item $ENTERPRISE_SKILLS_REPO_DIR -Recurse -Force -ErrorAction SilentlyContinue }
-            }
+        $schemaList = @($discovered.Split("`n") | Where-Object { $_ -match '^\s*[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\s*$' })
+        $schemaCount = $schemaList.Count
 
+        if ($schemaCount -eq 0) {
+            Write-Warn "No UC skill schemas found in this workspace"
+            $ucRegistrySchema = Read-Prompt "Enter skill schema manually (catalog.schema) or leave blank to skip" ""
+        } elseif ($schemaCount -eq 1) {
+            $ucRegistrySchema = $schemaList[0].Trim()
+            Write-Ok "Found skill schema: $ucRegistrySchema"
+            $confirm = Read-Prompt "Use this schema? (y/n)" "y"
+            if ($confirm -notin @("y","Y")) { $ucRegistrySchema = "" }
+        } else {
+            $schemaItems = @()
+            foreach ($s in $schemaList) {
+                $st = $s.Trim()
+                if ($st) { $schemaItems += @{ Label = $st; Value = $st; Hint = "" } }
+            }
+            $schemaItems += @{ Label = "Skip"; Value = "__SKIP__"; Hint = "do not configure UC skill registry" }
+            $ucRegistrySchema = Select-Radio -Title "Choose UC skill schema:" -Items $schemaItems
+            if ($ucRegistrySchema -eq "__SKIP__") { $ucRegistrySchema = "" }
+        }
+
+        if ($ucRegistrySchema) {
+            # Merge databricks-skill-registry entry into .mcp.json using ucode mcp-proxy
+            # (uvx databricks-skill-registry does not exist on PyPI; ucode provides the proxy)
+            $mcpFwd  = ($MCP_CONFIG -replace '\\', '/')
+            $wsUrl   = $script:WORKSPACE_URL.TrimEnd('/')
+            $prof    = $script:PROFILE_
+            $ucodeCmd = Get-Command ucode -ErrorAction SilentlyContinue
+            $ucodeBin = if ($ucodeCmd) { $ucodeCmd.Source -replace '\\', '/' } else { "ucode" }
+            $skillsUrl = "$wsUrl/ai-gateway/skills/?schema=$ucRegistrySchema"
+            $regScript = @"
+import json, pathlib
+path = pathlib.Path('$mcpFwd')
+existing = {}
+if path.exists():
+    try: existing = json.loads(path.read_text())
+    except: pass
+existing.setdefault('mcpServers', {})['databricks-skill-registry'] = {
+    'command': '$ucodeBin',
+    'args': ['mcp-proxy', '--url', '$skillsUrl', '--host', '$wsUrl', '--profile', '$prof']
+}
+path.write_text(json.dumps(existing, indent=2) + '\n')
+"@
             $prevEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-            if (Test-Path $repoGitDir) {
-                & git -C $ENTERPRISE_SKILLS_REPO_DIR fetch -q --depth 1 origin HEAD 2>&1 | Out-Null
-                & git -C $ENTERPRISE_SKILLS_REPO_DIR reset -q --hard FETCH_HEAD 2>&1 | Out-Null
-            } else {
-                & git clone -q --depth 1 $entCloneUrl $ENTERPRISE_SKILLS_REPO_DIR 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { $entReachable = $false; Write-Warn "Could not clone enterprise skills repo" }
+            $regOk = $false
+            if (Test-Path $VENV_PYTHON) {
+                & $VENV_PYTHON -c $regScript 2>&1 | Out-Null
+                if ($?) { $regOk = $true }
+            }
+            if (-not $regOk -and (Get-Command py -ErrorAction SilentlyContinue)) {
+                & py -c $regScript 2>&1 | Out-Null
+                if ($?) { $regOk = $true }
             }
             $ErrorActionPreference = $prevEAP
 
-            if ($entReachable) {
-                $entSrc = $ENTERPRISE_SKILLS_REPO_DIR
-                if ($ENTERPRISE_SKILLS_REPO_SUBPATH) { $entSrc = Join-Path $entSrc $ENTERPRISE_SKILLS_REPO_SUBPATH }
-
-                if (Test-Path $entSrc) {
-                    Get-ChildItem $entSrc -Directory | Where-Object { $_.Name -ne "TEMPLATE" } | ForEach-Object {
-                        $eName = $_.Name
-                        $eDest = Join-Path $SKILLS_DEST $eName
-                        if (Test-Path $eDest) { Remove-Item $eDest -Recurse -Force -ErrorAction SilentlyContinue }
-                        Copy-Item $_.FullName $eDest -Recurse -Force
-                        Add-Content -Path (Join-Path $_adk ".installed-skills") -Value "$SKILLS_DEST|$eName"
-                        $entSkillCount++
-                    }
-                    Write-Ok "Enterprise skills  ($entSkillCount installed)"
-                } else {
-                    Write-Warn "Enterprise skills subfolder not found: $entSrc"
-                }
+            if ($regOk) {
+                Write-Ok "UC Skill Registry  →  $ucRegistrySchema (live MCP)"
+                $ucRegistryOk = $true
+                # Persist schema so --skills-only re-runs can confirm/update it
+                Set-Content -Path (Join-Path $_adk ".skills-schema") -Value $ucRegistrySchema
+            } else {
+                Write-Warn "Failed to write databricks-skill-registry to .mcp.json — check for JSON errors"
             }
-        } else {
-            Write-Warn "Enterprise skills repo not reachable — skipping"
-            Write-Warn "  Repo: $ENTERPRISE_SKILLS_REPO"
-            Write-Warn "  Configure later and re-run with --skills-only"
         }
     }
 
@@ -887,7 +960,7 @@ if ($script:INSTALL_SKILLS) {
                 }
                 $ErrorActionPreference = $prevEAP
                 Write-Host ""
-                if ($genieFail -eq 0) { Write-Ok "Skills synced to Databricks Genie  ->  $genieTarget" }
+                if ($genieFail -eq 0) { Write-Ok "Skills synced to Databricks Genie  →  $genieTarget" }
                 else                  { Write-Warn "$genieFail skill(s) failed to sync — check manually at: $genieTarget" }
             }
         }
@@ -900,7 +973,7 @@ if ($script:INSTALL_SKILLS) {
 
 if (-not $script:SKILLS_ONLY) {
 
-Write-Step "Step 6 of 6 - Workspace"
+Write-Step "Step 6 of 6 — Workspace"
 
 $_adk = Join-Path $script:PROJECT_DIR ".ai-dev-kit"
 if (-not (Test-Path $_adk)) { New-Item -ItemType Directory -Path $_adk -Force | Out-Null }
@@ -939,16 +1012,16 @@ Write-Ok ".gitignore updated"
 Write-Host ""
 if ($script:SKILLS_ONLY) {
     Write-Host "+========================================================+" -ForegroundColor Green
-    Write-Host "|   v  Skills Updated                                    |" -ForegroundColor Green
+    Write-Host "|   ✓  Skills Updated                                    |" -ForegroundColor Green
     Write-Host "+========================================================+" -ForegroundColor Green
     Write-Host ""
     Write-Host ("  {0,-20} {1}" -f "Project",           $script:PROJECT_DIR)
     Write-Host ("  {0,-20} {1}" -f "MLflow skills",     "$MLFLOW_COUNT installed")
     Write-Host ("  {0,-20} {1}" -f "Agent skills",      "$AGENT_COUNT installed")
-    if ($entSkillCount -gt 0) { Write-Host ("  {0,-20} {1}" -f "Enterprise skills", "$entSkillCount installed") }
+    if ($ucRegistryOk) { Write-Host ("  {0,-20} {1}" -f "UC skill registry",  "$ucRegistrySchema (live)") }
 } else {
     Write-Host "+========================================================+" -ForegroundColor Green
-    Write-Host "|   v  Workspace Ready                                   |" -ForegroundColor Green
+    Write-Host "|   ✓  Workspace Ready                                   |" -ForegroundColor Green
     Write-Host "+========================================================+" -ForegroundColor Green
     Write-Host ""
     Write-Host ("  {0,-20} {1}" -f "Project",           $script:PROJECT_DIR)
@@ -957,11 +1030,12 @@ if ($script:SKILLS_ONLY) {
     Write-Host ("  {0,-20} {1}" -f "Profile",           $script:PROFILE_)
     Write-Host ("  {0,-20} {1}" -f "MLflow skills",     "$($MLFLOW_COUNT) installed")
     Write-Host ("  {0,-20} {1}" -f "Agent skills",      "$($AGENT_COUNT) installed")
-    if ($entSkillCount -gt 0) { Write-Host ("  {0,-20} {1}" -f "Enterprise skills", "$entSkillCount installed") }
+    if ($ucRegistryOk) { Write-Host ("  {0,-20} {1}" -f "UC skill registry",  "$ucRegistrySchema (live)") }
     Write-Host ("  {0,-20} {1}" -f "MCP config",        $MCP_CONFIG)
 }
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Open your project in Claude Code:  claude $($script:PROJECT_DIR)" -ForegroundColor Cyan
 Write-Host "  2. MCP + skills are active — try: `"List my SQL warehouses`""
+if ($ucRegistryOk) { Write-Host "  3. Enterprise skills live — try: `"List the skills in $ucRegistrySchema`"" }
 Write-Host ""
